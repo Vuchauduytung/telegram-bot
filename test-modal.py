@@ -17,7 +17,7 @@ def main() -> None:
         )
 
     payload = {
-        "model": os.getenv("MODAL_LLM_MODEL", "Qwen/Qwen3.6-35B-A3B-FP8"),
+        "model": os.getenv("MODAL_LLM_MODEL", "Qwen/Qwen3-4B-Instruct-2507"),
         "messages": [
             {"role": "system", "content": "You are a helpful assistant. Answer concisely."},
             {
@@ -38,7 +38,7 @@ def main() -> None:
             "Modal-Secret": modal_proxy_token_secret,
         },
         json=payload,
-        timeout=120,
+        timeout=600,
     )
     elapsed = time.perf_counter() - start
     response.raise_for_status()

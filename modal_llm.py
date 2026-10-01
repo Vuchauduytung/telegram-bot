@@ -10,19 +10,20 @@ import modal
 
 APP_NAME = "cloud-bot-llm"
 
-MODEL_NAME = "Qwen/Qwen3.6-35B-A3B-FP8"
-MODEL_REVISION = "95a723d08a9490559dae23d0cff1d9466213d989"
+MODEL_NAME = "Qwen/Qwen3-4B-Instruct-2507"
+MODEL_REVISION = "cdbee75f17c01a7cc42f958dc650907174af0554"
 
 PORT = 8000
 
-# Keep one replica alive at all times.
-MIN_CONTAINERS = 1
+# Scale to zero when idle; never keep a paid GPU warm.
+MIN_CONTAINERS = 0
+MAX_CONTAINERS = 1
 
 # One request at a time per replica for low latency.
 TARGET_CONCURRENCY = 1
 
-# H100 is enough for the ~35 GB FP8 model.
-GPU = "H100"
+# L4 is the smallest Modal GPU compatible with the current SGLang/CUDA image.
+GPU = "L4"
 
 
 # ============================================================
@@ -34,13 +35,6 @@ HF_CACHE_VOL = modal.Volume.from_name(
     "cloud-bot-huggingface-cache",
     create_if_missing=True,
 )
-
-DG_CACHE_PATH = "/root/.cache/deep_gemm"
-DG_CACHE_VOL = modal.Volume.from_name(
-    "cloud-bot-deepgemm-cache",
-    create_if_missing=True,
-)
-
 
 # ============================================================
 # Container image
@@ -55,7 +49,6 @@ image = (
         {
             "HF_HUB_CACHE": HF_CACHE_PATH,
             "HF_XET_HIGH_PERFORMANCE": "1",
-            "SGLANG_ENABLE_JIT_DEEPGEMM": "1",
             "SGLANG_USE_CUDA_IPC_TRANSPORT": "1",
             "SGLANG_USE_IPC_POOL_HANDLE_CACHE": "1",
         }
@@ -93,6 +86,9 @@ def start_sglang():
         "--served-model-name",
         MODEL_NAME,
 
+        "--dtype",
+        "half",
+
         "--host",
         "0.0.0.0",
 
@@ -113,11 +109,11 @@ def start_sglang():
 
         # Memory usage
         "--mem-fraction-static",
-        "0.8",
+        "0.75",
 
         # Context length
         "--context-length",
-        "32768",
+        "8192",
 
         # Metrics
         "--enable-metrics",
@@ -213,26 +209,26 @@ def warmup():
 @app.server(
     image=image,
     gpu=GPU,
+    cpu=4,
+    memory=16 * 1024,
 
     volumes={
         HF_CACHE_PATH: HF_CACHE_VOL,
-        DG_CACHE_PATH: DG_CACHE_VOL,
     },
 
     port=PORT,
 
-    # IMPORTANT:
-    # Keep one GPU container alive.
     min_containers=MIN_CONTAINERS,
+    max_containers=MAX_CONTAINERS,
 
     # Keep concurrency low for chatbot latency.
     target_concurrency=TARGET_CONCURRENCY,
 
     # Give Qwen/SGLang enough time to initialize.
-    startup_timeout=20 * 60,
+    startup_timeout=5 * 60,
 
-    # Keep warm container alive.
-    scaledown_window=30 * 60,
+    # Accept cold starts to avoid paying for an idle GPU.
+    scaledown_window=60,
 
     # Require Modal Proxy Token authentication at the endpoint.
     unauthenticated=False,

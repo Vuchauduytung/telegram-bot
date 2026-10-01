@@ -4,9 +4,13 @@ services:
       - .env.modal
     environment:
       LLM_PROVIDER: modal
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-application-default-credentials.json
-    volumes:
-      - type: bind
-        source: ${GOOGLE_APPLICATION_CREDENTIALS_FILE:-${HOME}/.config/gcloud/application_default_credentials.json}
-        target: /run/secrets/google-application-default-credentials.json
-        read_only: true
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_MODEL: intfloat/multilingual-e5-small
+      EMBEDDING_DIMENSIONS: "384"
+      QDRANT_COLLECTION: cloud_bot_knowledge_e5
+      LLM_MAX_TOKENS: "256"
+      LLM_TIMEOUT_SECONDS: "600"
+      MODAL_MAX_REQUESTS_PER_MONTH: "400"
+      SESSION_MAX_TURNS: "4"
+      RAG_TOP_K: "3"
+      RAG_CONTEXT_MAX_CHARS: "4000"
