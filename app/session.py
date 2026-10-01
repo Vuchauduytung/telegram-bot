@@ -5,10 +5,8 @@ from datetime import datetime, timezone
 from redis.asyncio import Redis
 
 from app.config import Settings
-
-logger = logging.getLogger(__name__)
 _local_history: dict[str, list[dict[str, str]]] = {}
-_clients: dict[str, Redis] = {}
+_clients: dict[tuple[str, str], Redis] = {}
 
 
 class ModalMonthlyQuotaExceeded(Exception):
@@ -19,15 +17,17 @@ class ModalQuotaStoreUnavailable(Exception):
     pass
 
 
-def _redis(url: str) -> Redis:
-    if url not in _clients:
-        _clients[url] = Redis.from_url(
+def _redis(url: str, token: str = "") -> Redis:
+    client_key = (url, token)
+    if client_key not in _clients:
+        _clients[client_key] = Redis.from_url(
             url,
+            password=token or None,
             decode_responses=True,
             socket_connect_timeout=2,
             socket_timeout=2,
         )
-    return _clients[url]
+    return _clients[client_key]
 
 
 def _session_key(chat_id: str) -> str:
@@ -36,7 +36,7 @@ def _session_key(chat_id: str) -> str:
 
 async def get_history(settings: Settings, chat_id: str) -> list[dict[str, str]]:
     try:
-        values = await _redis(settings.valkey_url).lrange(
+        values = await _redis(settings.valkey_url, settings.valkey_token).lrange(
             _session_key(chat_id),
             -settings.session_max_turns * 2,
             -1,
@@ -58,7 +58,7 @@ async def save_exchange(
         {"role": "assistant", "content": assistant_reply},
     ]
     try:
-        client = _redis(settings.valkey_url)
+        client = _redis(settings.valkey_url, settings.valkey_token)
         key = _session_key(chat_id)
         await client.rpush(
             key,
@@ -76,7 +76,7 @@ async def save_exchange(
 async def clear_session(settings: Settings, chat_id: str) -> None:
     _local_history.pop(chat_id, None)
     try:
-        await _redis(settings.valkey_url).delete(_session_key(chat_id))
+        await _redis(settings.valkey_url, settings.valkey_token).delete(_session_key(chat_id))
     except Exception as error:
         logger.warning("Could not clear Valkey session: %s", error)
 
@@ -92,7 +92,7 @@ async def reserve_modal_request(settings: Settings) -> None:
         "return 1"
     )
     try:
-        allowed = await _redis(settings.valkey_url).eval(
+        allowed = await _redis(settings.valkey_url, settings.valkey_token).eval(
             script,
             1,
             key,

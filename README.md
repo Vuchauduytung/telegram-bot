@@ -6,7 +6,7 @@ The bot retrieves relevant Markdown/TXT sources from Qdrant and appends source c
 
 ## Configure
 
-Create a Telegram bot with [@BotFather](https://t.me/BotFather), then copy `.env.example` to `.env` and set `BOT_TOKEN`.
+Create a Telegram bot with [@BotFather](https://t.me/BotFather), then copy `.env.example` to `.env` and set `TELEGRAM_BOT_TOKEN` (the legacy `BOT_TOKEN` name is still accepted).
 
 ## Free-tier profile (recommended)
 
@@ -17,7 +17,7 @@ The free profile uses `gemini-2.5-flash` for answers and `intfloat/multilingual-
 ## Optional paid providers
 
 - **Vertex AI:** set `LLM_PROVIDER=gemini` or `EMBEDDING_PROVIDER=vertex`, configure `GOOGLE_CLOUD_PROJECT`, and provide ADC. These requests are billed to Google Cloud; Gemini API free-tier quotas do not apply.
-- **Modal low-cost GPU:** copy `.env.modal.example` to `.env.modal`, create a dedicated proxy token, and configure the private endpoint. The profile uses Qwen3 4B-Instruct in FP16 on an L4, scales to zero (`min_containers=0`), caps at one container, and scales down after 60 idle seconds. Cold starts are expected; no GPU stays warm while idle.
+- **Modal low-cost GPU:** set `MODAL_ENDPOINT_URL` and `MODAL_PROXY_TOKEN` in `.env`; the token format is `wk-token-id.ws-token-secret`. The legacy `.env.modal` URL and split token fields remain accepted. The profile uses Qwen3 4B-Instruct in FP16 on an L4, scales to zero (`min_containers=0`), caps at one container, and scales down after 60 idle seconds. Cold starts are expected; no GPU stays warm while idle.
 
 `BOT_SYSTEM_PROMPT`, model names, request timeout, token limit, session length, and session TTL can also be changed in `.env`.
 
@@ -43,7 +43,7 @@ docker compose logs -f bot
 
 This profile requires `GEMINI_API_KEY` in `.env`; it does not mount Google Cloud credentials or call Vertex AI. Qdrant and Valkey run locally in Compose with persistent volumes.
 
-For paid Vertex generation/embedding, use `compose.gemini.yaml`; it mounts host ADC read-only. For paid Modal generation, configure `.env.modal` and run:
+For paid Vertex generation/embedding, use `compose.gemini.yaml`; it mounts host ADC read-only. For Modal generation, set `MODAL_ENDPOINT_URL` and `MODAL_PROXY_TOKEN` in `.env` and run:
 
 ```bash
 docker compose -f compose.yaml -f compose.modal.yaml up -d --build
@@ -53,13 +53,13 @@ As of October 2026, Modal lists L4 at `$0.000222/GPU-second`. With this profile'
 
 Google **Cloud Functions** does not attach GPUs. Google **Cloud Run services** support L4 GPUs and scale to zero, but require at least 4 vCPU and 16 GiB RAM, and bill the GPU for the instance's full lifetime. For this small, bursty budget, Modal's per-second GPU billing is the chosen optional profile; Cloud Run is a valid alternative if its full instance cost fits the budget.
 
-All Compose modes start Qdrant with a persistent volume and mount `./knowledge` read-only. The free and Modal profiles run embeddings locally. Vertex-mode embeddings require ADC.
+All Compose modes start local Qdrant/Valkey containers with persistent volumes and mount `./knowledge` read-only. Leave `QDRANT_URL` and `VALKEY_URL` blank to use those local services. To use managed services, set the Qdrant HTTPS URL plus `QDRANT_API_KEY`, and the Valkey `rediss://` URL plus `VALKEY_TOKEN`; Compose passes these credentials through to the clients. `GITHUB_TOKEN` and `HF_TOKEN` are optional integration/download credentials, not needed for normal bot traffic. The free and Modal profiles run embeddings locally. Vertex-mode embeddings require ADC.
 
 ## RAG Knowledge Base
 
 Add UTF-8 `.md` or `.txt` documents to `knowledge/`. In the free profile, ingestion chunks each source, creates 384-dimensional multilingual-E5 vectors locally, and upserts metadata and vectors into the private Qdrant service. The bot retrieves top matching chunks before generation and includes source filenames in its reply. Re-ingesting a changed document replaces its previous chunks.
 
-With the Modal deployment:
+With the Modal deployment (`MODAL_ENDPOINT_URL` and `MODAL_PROXY_TOKEN` in `.env`):
 
 ```bash
 docker compose -f compose.yaml -f compose.modal.yaml run --rm bot python -m app.ingest

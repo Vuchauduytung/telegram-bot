@@ -20,10 +20,12 @@ class Settings:
     llm_timeout_seconds: float
     llm_max_tokens: int
     valkey_url: str
+    valkey_token: str
     session_max_turns: int
     session_ttl: int
     knowledge_dir: str
     qdrant_url: str
+    qdrant_api_key: str
     qdrant_collection: str
     embedding_model: str
     embedding_dimensions: int
@@ -42,8 +44,17 @@ def get_settings() -> Settings:
     if embedding_provider not in {"local", "vertex"}:
         raise RuntimeError("EMBEDDING_PROVIDER phải là 'local' hoặc 'vertex'.")
 
+    proxy_token = os.getenv("MODAL_PROXY_TOKEN", "").strip()
+    proxy_token_id = os.getenv("MODAL_PROXY_TOKEN_ID", "").strip()
+    proxy_token_secret = os.getenv("MODAL_PROXY_TOKEN_SECRET", "").strip()
+    if proxy_token and not (proxy_token_id and proxy_token_secret):
+        proxy_token_id, separator, proxy_token_secret = proxy_token.partition(".")
+        if not separator:
+            proxy_token_id = ""
+            proxy_token_secret = ""
+
     settings = Settings(
-        bot_token=os.getenv("BOT_TOKEN", "").strip(),
+        bot_token=(os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or os.getenv("BOT_TOKEN", "").strip()),
         llm_provider=provider,
         system_prompt=os.getenv(
             "BOT_SYSTEM_PROMPT",
@@ -52,21 +63,27 @@ def get_settings() -> Settings:
         ),
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-        google_cloud_project=os.getenv("GOOGLE_CLOUD_PROJECT", ""),
+        google_cloud_project=os.getenv("GCP_PROJECT_ID", "").strip()
+        or os.getenv("GOOGLE_CLOUD_PROJECT", "").strip(),
         google_cloud_location=os.getenv("GOOGLE_CLOUD_LOCATION", "global"),
-        modal_llm_url=os.getenv("MODAL_LLM_URL", "").rstrip("/"),
+        modal_llm_url=(
+            os.getenv("MODAL_ENDPOINT_URL", "").strip()
+            or os.getenv("MODAL_LLM_URL", "").strip()
+        ).rstrip("/"),
         modal_llm_model=os.getenv("MODAL_LLM_MODEL", "Qwen/Qwen3-4B-Instruct-2507"),
-        modal_proxy_token_id=os.getenv("MODAL_PROXY_TOKEN_ID", "").strip(),
-        modal_proxy_token_secret=os.getenv("MODAL_PROXY_TOKEN_SECRET", "").strip(),
+        modal_proxy_token_id=proxy_token_id,
+        modal_proxy_token_secret=proxy_token_secret,
         modal_max_requests_per_month=int(os.getenv("MODAL_MAX_REQUESTS_PER_MONTH", "400")),
         embedding_provider=embedding_provider,
         llm_timeout_seconds=float(os.getenv("LLM_TIMEOUT_SECONDS", "120")),
         llm_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "512")),
-        valkey_url=os.getenv("VALKEY_URL", "redis://localhost:6379/0"),
+        valkey_url=os.getenv("VALKEY_URL", "").strip() or "redis://localhost:6379/0",
+        valkey_token=os.getenv("VALKEY_TOKEN", "").strip(),
         session_max_turns=int(os.getenv("SESSION_MAX_TURNS", "10")),
         session_ttl=int(os.getenv("SESSION_TTL", "86400")),
         knowledge_dir=os.getenv("KNOWLEDGE_DIR", "knowledge"),
-        qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+        qdrant_url=os.getenv("QDRANT_URL", "").strip() or "http://localhost:6333",
+        qdrant_api_key=os.getenv("QDRANT_API_KEY", "").strip(),
         qdrant_collection=os.getenv("QDRANT_COLLECTION", "cloud_bot_knowledge"),
         embedding_model=os.getenv(
             "EMBEDDING_MODEL",
@@ -81,7 +98,7 @@ def get_settings() -> Settings:
     )
 
     if not settings.bot_token:
-        raise RuntimeError("BOT_TOKEN chưa được cấu hình.")
+        raise RuntimeError("TELEGRAM_BOT_TOKEN chưa được cấu hình (BOT_TOKEN cũ vẫn được hỗ trợ).")
     if provider == "gemini-api" and not settings.gemini_api_key:
         raise RuntimeError("Cần GEMINI_API_KEY khi dùng Gemini Developer API.")
     if provider == "gemini" and not settings.google_cloud_project:
@@ -89,11 +106,11 @@ def get_settings() -> Settings:
     if embedding_provider == "vertex" and not settings.google_cloud_project:
         raise RuntimeError("Cần GOOGLE_CLOUD_PROJECT khi EMBEDDING_PROVIDER=vertex.")
     if provider == "modal" and not settings.modal_llm_url:
-        raise RuntimeError("Cần MODAL_LLM_URL khi LLM_PROVIDER=modal.")
+        raise RuntimeError("Cần MODAL_ENDPOINT_URL khi LLM_PROVIDER=modal.")
     if provider == "modal" and not settings.modal_proxy_token_id:
-        raise RuntimeError("Cần MODAL_PROXY_TOKEN_ID khi LLM_PROVIDER=modal.")
+        raise RuntimeError("Cần MODAL_PROXY_TOKEN dạng wk-id.ws-secret khi LLM_PROVIDER=modal.")
     if provider == "modal" and not settings.modal_proxy_token_secret:
-        raise RuntimeError("Cần MODAL_PROXY_TOKEN_SECRET khi LLM_PROVIDER=modal.")
+        raise RuntimeError("MODAL_PROXY_TOKEN thiếu phần secret (ws-...).")
     if settings.modal_max_requests_per_month < 1:
         raise RuntimeError("MODAL_MAX_REQUESTS_PER_MONTH phải lớn hơn 0.")
     if settings.session_max_turns < 1 or settings.session_ttl < 1:

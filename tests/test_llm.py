@@ -1,8 +1,9 @@
+import os
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.llm import (
     _post_modal_completion,
     build_gemini_contents,
@@ -24,15 +25,17 @@ def settings(provider: str) -> Settings:
         modal_llm_model="test-model",
         modal_proxy_token_id="wk-test-id",
         modal_proxy_token_secret="ws-test-secret",
-        modal_max_requests_per_month=180,
+        modal_max_requests_per_month=400,
         embedding_provider="local",
         llm_timeout_seconds=30,
         llm_max_tokens=128,
         valkey_url="redis://localhost:6379/0",
+        valkey_token="",
         session_max_turns=10,
         session_ttl=3600,
         knowledge_dir="knowledge",
         qdrant_url="http://localhost:6333",
+        qdrant_api_key="",
         qdrant_collection="cloud_bot_knowledge",
         embedding_model="gemini-embedding-001",
         embedding_dimensions=768,
@@ -45,6 +48,29 @@ def settings(provider: str) -> Settings:
 
 
 class LLMFormattingTests(unittest.TestCase):
+    def test_template_environment_names_configure_hosted_services(self):
+        template_env = {
+            "TELEGRAM_BOT_TOKEN": "telegram-test-token",
+            "LLM_PROVIDER": "modal",
+            "MODAL_ENDPOINT_URL": "https://private.modal.run/",
+            "MODAL_PROXY_TOKEN": "wk-test-key.ws-test-secret",
+            "QDRANT_URL": "https://qdrant.example:6333",
+            "QDRANT_API_KEY": "qdrant-test-key",
+            "VALKEY_URL": "rediss://valkey.example:6379",
+            "VALKEY_TOKEN": "valkey-test-token",
+        }
+        with patch.dict(os.environ, template_env, clear=True):
+            loaded = get_settings()
+
+        self.assertEqual(loaded.bot_token, "telegram-test-token")
+        self.assertEqual(loaded.modal_llm_url, "https://private.modal.run")
+        self.assertEqual(loaded.modal_proxy_token_id, "wk-test-key")
+        self.assertEqual(loaded.modal_proxy_token_secret, "ws-test-secret")
+        self.assertEqual(loaded.qdrant_url, "https://qdrant.example:6333")
+        self.assertEqual(loaded.qdrant_api_key, "qdrant-test-key")
+        self.assertEqual(loaded.valkey_url, "rediss://valkey.example:6379")
+        self.assertEqual(loaded.valkey_token, "valkey-test-token")
+
     def test_gemini_maps_assistant_history_to_model_role(self):
         contents = build_gemini_contents(
             [

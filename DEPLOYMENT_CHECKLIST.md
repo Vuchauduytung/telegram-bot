@@ -59,9 +59,9 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 - [ ] Confirm the bot's atomic Valkey quota is set to 400 Modal generation attempts per UTC month. It fails closed if Valkey is down; direct endpoint calls with the Proxy Token bypass this app-level quota.
 - [ ] Cloud Functions do not attach GPUs. If evaluating Google's GPU option, compare Cloud Run L4 (at least 4 vCPU/16 GiB; GPU billed for full instance lifetime even though it can scale to zero) against the Modal profile.
 - [ ] Confirm `modal_llm.py` keeps `unauthenticated=False`; Modal proxy authentication must reject unauthenticated requests with HTTP 401.
-- [ ] Create a dedicated proxy token with `modal workspace proxy-tokens create --name cloud-bot-bot`. If workspace RBAC is enabled, allow it only in the deployment environment. The token secret is shown once; store it only in `.env.modal`.
-- [ ] Deploy the private model service with `modal deploy modal_llm.py` and record its base URL in `.env.modal`, without adding `/v1/chat/completions`.
-- [ ] Set `MODAL_PROXY_TOKEN_ID`, `MODAL_PROXY_TOKEN_SECRET`, `MODAL_LLM_URL`, and `MODAL_LLM_MODEL` in `.env.modal`; verify `.env.modal` is ignored by Git.
+- [ ] Create a dedicated proxy token with `modal workspace proxy-tokens create --name cloud-bot-bot`. If workspace RBAC is enabled, allow it only in the deployment environment. The secret is shown once; store `ID.SECRET` as `MODAL_PROXY_TOKEN` in `.env` with mode `0600`.
+- [ ] Deploy the private model service with `modal deploy modal_llm.py` and record its base URL as `MODAL_ENDPOINT_URL` in `.env`, without adding `/v1/chat/completions`.
+- [ ] Verify `.env` is ignored by Git. The older `.env.modal` split-key variables are supported only as a compatibility fallback.
 - [ ] Run `python test-modal.py` and confirm response text and latency before starting the Telegram bot.
 - [ ] Start the bot with `docker compose -f compose.yaml -f compose.modal.yaml up -d --build` and verify authenticated provider access from inside the container.
 - [ ] Confirm Modal returns to zero active containers after the 60-second idle window; send one smoke request, verify cold-start behavior, then confirm it scales down.

@@ -1,23 +1,25 @@
-import os
 import time
 
 import httpx
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 
 def main() -> None:
-    load_dotenv(".env.modal")
-    modal_llm_url = os.getenv("MODAL_LLM_URL", "").rstrip("/")
-    modal_proxy_token_id = os.getenv("MODAL_PROXY_TOKEN_ID", "")
-    modal_proxy_token_secret = os.getenv("MODAL_PROXY_TOKEN_SECRET", "")
+    env = dotenv_values(".env.modal")
+    env.update({key: value for key, value in dotenv_values(".env").items() if value})
+    modal_llm_url = (env.get("MODAL_ENDPOINT_URL") or env.get("MODAL_LLM_URL") or "").rstrip("/")
+    proxy_token = env.get("MODAL_PROXY_TOKEN") or ""
+    modal_proxy_token_id, separator, modal_proxy_token_secret = proxy_token.partition(".")
+    if not separator:
+        modal_proxy_token_id = env.get("MODAL_PROXY_TOKEN_ID") or ""
+        modal_proxy_token_secret = env.get("MODAL_PROXY_TOKEN_SECRET") or ""
     if not all((modal_llm_url, modal_proxy_token_id, modal_proxy_token_secret)):
         raise RuntimeError(
-            "Set MODAL_LLM_URL, MODAL_PROXY_TOKEN_ID, and "
-            "MODAL_PROXY_TOKEN_SECRET in .env.modal."
+            "Set MODAL_ENDPOINT_URL and MODAL_PROXY_TOKEN in .env."
         )
 
     payload = {
-        "model": os.getenv("MODAL_LLM_MODEL", "Qwen/Qwen3-4B-Instruct-2507"),
+        "model": env.get("MODAL_LLM_MODEL") or "Qwen/Qwen3-4B-Instruct-2507",
         "messages": [
             {"role": "system", "content": "You are a helpful assistant. Answer concisely."},
             {

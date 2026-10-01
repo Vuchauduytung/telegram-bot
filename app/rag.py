@@ -16,16 +16,16 @@ class RetrievedChunk:
 
 
 @lru_cache(maxsize=4)
-def _qdrant_client(url: str) -> Any:
+def _qdrant_client(url: str, api_key: str = "") -> Any:
     from qdrant_client import QdrantClient
 
-    return QdrantClient(url=url, timeout=10)
+    return QdrantClient(url=url, api_key=api_key or None, timeout=10)
 
 
 def ensure_collection(settings: Settings, client: Any | None = None) -> Any:
-    from qdrant_client.models import Distance, VectorParams
+    from qdrant_client.models import Distance, PayloadSchemaType, VectorParams
 
-    client = client or _qdrant_client(settings.qdrant_url)
+    client = client or _qdrant_client(settings.qdrant_url, settings.qdrant_api_key)
     if not client.collection_exists(settings.qdrant_collection):
         client.create_collection(
             collection_name=settings.qdrant_collection,
@@ -44,23 +44,29 @@ def ensure_collection(settings: Settings, client: Any | None = None) -> Any:
                 f"{settings.embedding_dimensions}. Recreate/re-index the collection after changing "
                 "EMBEDDING_DIMENSIONS."
             )
+    client.create_payload_index(
+        collection_name=settings.qdrant_collection,
+        field_name="document_id",
+        field_schema=PayloadSchemaType.KEYWORD,
+        wait=True,
+    )
     return client
 
 
 def search_chunks(settings: Settings, vector: list[float]) -> list[RetrievedChunk]:
-    client = _qdrant_client(settings.qdrant_url)
+    client = _qdrant_client(settings.qdrant_url, settings.qdrant_api_key)
     if not client.collection_exists(settings.qdrant_collection):
         return []
 
-    points = client.search(
+    response = client.query_points(
         collection_name=settings.qdrant_collection,
-        query_vector=vector,
+        query=vector,
         limit=settings.rag_top_k,
         score_threshold=settings.rag_min_score,
         with_payload=True,
     )
     results = []
-    for point in points:
+    for point in response.points:
         payload = point.payload or {}
         text = payload.get("text")
         if not text:

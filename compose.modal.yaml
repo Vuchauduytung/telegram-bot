@@ -1,7 +1,5 @@
 services:
   bot:
-    env_file:
-      - .env.modal
     environment:
       LLM_PROVIDER: modal
       EMBEDDING_PROVIDER: local

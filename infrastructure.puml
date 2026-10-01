@@ -1,5 +1,5 @@
-@startuml cloud_bot_infrastructure
-title Cloud Bot - Deployed Infrastructure and RAG Target
+@startuml cloud_bot_infrastructure_v2
+title Cloud Bot - Serverless Webhook Infrastructure (Option A)
 
 left to right direction
 skinparam componentStyle rectangle
@@ -8,64 +8,82 @@ skinparam packageStyle rectangle
 skinparam defaultTextAlignment center
 
 actor "Telegram user" as user
-cloud "Telegram Bot API" as telegram
-cloud "Gemini Developer API\nfree tier, quota limited" as gemini_api
-cloud "Vertex AI\noptional paid provider" as vertex
-cloud "Modal Qwen3 4B FP16 / L4\noptional paid, scale-to-zero" as modal_paid
+cloud "Telegram Bot API\nhttps://api.telegram.org" as telegram
 
-node "Bot host" as host {
-  node "Docker Compose network" as compose {
-    component "Telegram bot\npython-telegram-bot polling\napp.main" as bot
+package "GCP Cloud Run (Serverless App Host)" {
+  node "Stateless Container\n2GB RAM / 2 vCPU (Scale-to-Zero)" as cloud_run {
+    component "Flask API\n/webhook POST endpoint\napp.py" as flask_app
+    component "RAG retrieval module\ntop-k + context + citations" as retrieval
     component "multilingual-e5-small\nlocal CPU embeddings\n384 dimensions" as embedder
-    database "Qdrant\ncloud_bot_knowledge\nprivate port :6333" as qdrant
-    database "Valkey\nper-chat conversation history" as valkey
   }
-
-  folder "Persistent storage" as storage {
-    artifact "qdrant-data volume" as qdrant_data
-    artifact "valkey-data volume" as valkey_data
-  }
-
-  artifact ".env\nBOT_TOKEN + GEMINI_API_KEY\nGit-ignored" as bot_env
 }
 
-folder "Knowledge documents\nMarkdown / TXT, read-only mount" as documents
-component "Ingestion CLI\nparse, chunk, local embeddings" as ingestion
-component "RAG retrieval\ntop-k + context + citations" as retrieval
+package "Managed Cloud Databases (State & Vector)" {
+  database "Qdrant Cloud\ncloud_bot_knowledge\nHTTPS + API key" as qdrant_cloud
+  database "Managed Valkey / Upstash\nrediss:// + TLS token\nHistory & Quota counter" as valkey_cloud
+}
 
-user --> telegram : chat messages
-bot --> telegram : HTTPS long polling
-bot --> valkey : read/write history
-bot --> embedder : query: prefix
-embedder --> qdrant : query vector + top-k search
-valkey ..> valkey_data : persists data
-qdrant ..> qdrant_data : persists vectors
+package "LLM Inference Providers" {
+  cloud "Gemini Developer API\nfree tier, quota limited\n(Default LLM)" as gemini_api
+  cloud "Modal Qwen3 4B FP16 / L4\npaid, scale-to-zero (60s)\n(Optional LLM)" as modal_paid
+  cloud "Vertex AI\noptional paid provider" as vertex
+}
 
-bot --> gemini_api : HTTPS generateContent
-bot ..> vertex : optional paid generation
-bot ..> modal_paid : optional paid generation
+folder "Knowledge documents\nMarkdown / TXT, read-only" as documents
+component "Local Ingestion CLI\nparse, chunk, local embeddings" as ingestion
+
+artifact ".env / GCP Secrets\nTelegram, Qdrant, Valkey, Modal, Gemini\nGit-ignored" as bot_env
+
+' --- Data Flow & Interconnections ---
+
+user --> telegram : 1. Send chat message
+telegram --> flask_app : 2. HTTPS POST /webhook (Push)
+
+flask_app --> valkey_cloud : 3. Check quota counter (400 limit) & fetch 4-turn history
+flask_app --> retrieval : 4. Execute RAG query pipeline
+
+retrieval --> embedder : 5. Pass text with "query:" prefix
+embedder --> qdrant_cloud : 6. Dense vector search (384d top-k)
+qdrant_cloud --> retrieval : 7. Return matching text chunks
+
+flask_app --> gemini_api : 8a. HTTPS generateContent (Default Free)
+flask_app ..> modal_paid : 8b. HTTPS inference (If Valkey quota OK)
+flask_app ..> vertex : 8c. Optional paid fallback
+
+gemini_api --> flask_app : 9. Stream/Return generated response
+modal_paid ..> flask_app : 9. Stream/Return generated response
+
+flask_app --> valkey_cloud : 10. Update chat history & increment quota counter
+flask_app --> telegram : 11. HTTPS sendMessage response (200 OK)
+telegram --> user : 12. Deliver message to user
 
 documents --> ingestion
-ingestion --> embedder : passage: prefix
-ingestion --> qdrant : upsert chunks + source metadata
-bot --> retrieval : semantic query
-retrieval --> qdrant : dense vector search
-retrieval --> bot : context + citations
+ingestion --> embedder : Embed with "passage:" prefix
+ingestion --> qdrant_cloud : Upsert vector chunks & metadata
 
-note bottom of retrieval
-  Free profile: Markdown/TXT, local embeddings,
-  Qdrant dense top-k retrieval, and source citations.
-  Gemini free tier has usage quotas. Vertex/Modal are not used
-  unless an explicitly paid Compose profile is selected.
+' --- Explanatory Notes ---
+
+note bottom of cloud_run
+  **Cloud Run Specs:**
+  - Scale-to-Zero when idle ($0 cost)
+  - Memory: 2 GiB (Safe for PyTorch/multilingual-e5)
+  - CPU: 2 vCPU
+  - Free Tier: 2M requests/mo + 180k vCPU-secs
 end note
 
-note right of modal_paid
-  min_containers=0, max_containers=1,
-  60-second idle scale-down, 8K context,
-  max 256 generated tokens, 400 bot calls/month.
-  App quota is not a billing hard cap.
-  Cloud Functions has no GPU attachment;
-  Cloud Run GPU is a separate product.
+note bottom of modal_paid
+  **Modal L4 Configuration:**
+  - min_containers=0, max_containers=1
+  - 60s idle scale-down
+  - SGLang optimized (sm_89)
+  - App Quota: Max 400 calls/month (UTC) via Valkey
+end note
+
+note bottom of valkey_cloud
+  **Managed Valkey State:**
+  - Stores 4-turn conversation context
+  - Tracks monthly UTC call counter for Modal
+  - TLS encrypted connection (rediss://)
 end note
 
 @enduml

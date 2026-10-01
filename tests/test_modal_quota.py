@@ -14,6 +14,7 @@ class ModalQuotaTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.settings = SimpleNamespace(
             valkey_url="redis://test",
+            valkey_token="",
             modal_max_requests_per_month=400,
         )
 

@@ -1,11 +1,59 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from app.ingest import chunk_text
 from app.embeddings import format_e5_inputs
-from app.rag import RetrievedChunk, format_citations, format_context
+from app.rag import RetrievedChunk, ensure_collection, format_citations, format_context, search_chunks
 
 
 class RagFormattingTests(unittest.TestCase):
+    def test_collection_ensures_document_id_keyword_index(self):
+        from qdrant_client.models import PayloadSchemaType
+
+        client = MagicMock()
+        client.collection_exists.return_value = False
+        settings = SimpleNamespace(
+            qdrant_collection="knowledge",
+            embedding_dimensions=384,
+        )
+
+        ensure_collection(settings, client)
+
+        client.create_payload_index.assert_called_once_with(
+            collection_name="knowledge",
+            field_name="document_id",
+            field_schema=PayloadSchemaType.KEYWORD,
+            wait=True,
+        )
+
+    def test_search_chunks_uses_query_points(self):
+        point = SimpleNamespace(
+            payload={"title": "Brewing guide", "source": "guide.md", "text": "Use warm water."},
+            score=0.8,
+        )
+        client = MagicMock()
+        client.query_points.return_value.points = [point]
+        settings = SimpleNamespace(
+            qdrant_url="https://qdrant.example",
+            qdrant_api_key="",
+            qdrant_collection="knowledge",
+            rag_top_k=3,
+            rag_min_score=0.35,
+        )
+
+        with patch("app.rag._qdrant_client", return_value=client):
+            chunks = search_chunks(settings, [0.1, 0.2])
+
+        self.assertEqual(chunks, [RetrievedChunk("Brewing guide", "guide.md", "Use warm water.", 0.8)])
+        client.query_points.assert_called_once_with(
+            collection_name="knowledge",
+            query=[0.1, 0.2],
+            limit=3,
+            score_threshold=0.35,
+            with_payload=True,
+        )
+
     def test_local_e5_embeddings_use_query_and_passage_prefixes(self):
         self.assertEqual(
             format_e5_inputs(["find this"], "RETRIEVAL_QUERY"),
