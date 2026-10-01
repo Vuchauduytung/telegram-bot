@@ -1,0 +1,81 @@
+@startuml cloud_bot_infrastructure
+title Cloud Bot - Deployed Infrastructure and RAG Target
+
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam defaultTextAlignment center
+
+actor "Telegram user" as user
+cloud "Telegram Bot API" as telegram
+cloud "Google Vertex AI\nGemini (alternate provider)" as gemini
+
+node "Bot host" as host {
+  node "Docker Compose network" as compose {
+    component "Telegram bot\npython-telegram-bot polling\napp.main" as bot
+    database "Qdrant\ncloud_bot_knowledge\nprivate port :6333" as qdrant
+    database "Valkey\nper-chat conversation history" as valkey
+  }
+
+  folder "Persistent storage" as storage {
+    artifact "qdrant-data volume" as qdrant_data
+    artifact "valkey-data volume" as valkey_data
+  }
+
+  artifact ".env\nBOT_TOKEN and common settings\nGit-ignored" as bot_env
+  artifact ".env.modal\nModal URL and Proxy Token\nmode 0600, Git-ignored" as modal_env
+}
+
+package "Modal workspace" as modal_workspace {
+  component "Modal proxy\nProxy Token authentication" as modal_proxy
+
+  node "Private Modal Server\nunauthenticated = false" as modal_server {
+    node "H100 GPU container" as gpu_container {
+      component "SGLang\nOpenAI-compatible API\n:8000" as sglang
+    }
+  }
+
+  folder "Modal volumes" as modal_volumes {
+    artifact "Hugging Face model cache" as hf_cache
+    artifact "DeepGEMM cache" as deepgemm_cache
+  }
+}
+
+folder "Knowledge documents\nMarkdown / TXT, read-only mount" as documents
+component "Ingestion CLI\nparse, chunk, Vertex embeddings" as ingestion
+component "RAG retrieval\ntop-k + context + citations" as retrieval
+
+user --> telegram : chat messages
+bot --> telegram : HTTPS long polling
+bot --> valkey : read/write history
+bot --> qdrant : query embedding + top-k search
+valkey ..> valkey_data : persists data
+qdrant ..> qdrant_data : persists vectors
+
+bot --> modal_proxy : POST /v1/chat/completions\nModal-Key + Modal-Secret
+modal_proxy --> sglang : authenticated proxy route
+sglang ..> hf_cache : model files
+sglang ..> deepgemm_cache : kernel cache
+
+bot ..> gemini : selected only when\nLLM_PROVIDER=gemini
+
+documents --> ingestion
+ingestion --> gemini : RETRIEVAL_DOCUMENT embeddings
+ingestion --> qdrant : upsert chunks + source metadata
+bot --> retrieval : query embedding\n(RETRIEVAL_QUERY)
+retrieval --> qdrant : dense vector search
+retrieval --> bot : context + citations
+
+note bottom of modal_proxy
+  Requests without a valid Modal Proxy Token
+  are rejected with HTTP 401.
+end note
+
+note bottom of retrieval
+  Implemented MVP: Markdown/TXT, Vertex embeddings,
+  Qdrant dense top-k retrieval, and source citations.
+  PDF, hybrid search, reranking, and evaluation are not deployed.
+end note
+
+@enduml
