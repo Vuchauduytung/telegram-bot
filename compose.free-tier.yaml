@@ -1,0 +1,9 @@
+services:
+  bot:
+    environment:
+      LLM_PROVIDER: gemini-api
+      EMBEDDING_PROVIDER: local
+      GEMINI_MODEL: gemini-2.5-flash
+      EMBEDDING_MODEL: intfloat/multilingual-e5-small
+      EMBEDDING_DIMENSIONS: 384
+      QDRANT_COLLECTION: cloud_bot_knowledge_e5

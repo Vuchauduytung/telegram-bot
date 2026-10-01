@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime, timezone
 
 from redis.asyncio import Redis
 
@@ -8,6 +9,14 @@ from app.config import Settings
 logger = logging.getLogger(__name__)
 _local_history: dict[str, list[dict[str, str]]] = {}
 _clients: dict[str, Redis] = {}
+
+
+class ModalMonthlyQuotaExceeded(Exception):
+    pass
+
+
+class ModalQuotaStoreUnavailable(Exception):
+    pass
 
 
 def _redis(url: str) -> Redis:
@@ -70,6 +79,30 @@ async def clear_session(settings: Settings, chat_id: str) -> None:
         await _redis(settings.valkey_url).delete(_session_key(chat_id))
     except Exception as error:
         logger.warning("Could not clear Valkey session: %s", error)
+
+
+async def reserve_modal_request(settings: Settings) -> None:
+    month = datetime.now(timezone.utc).strftime("%Y-%m")
+    key = f"cloud-bot:modal-requests:{month}"
+    script = (
+        "local count = tonumber(redis.call('GET', KEYS[1]) or '0') "
+        "if count >= tonumber(ARGV[1]) then return 0 end "
+        "local next_count = redis.call('INCR', KEYS[1]) "
+        "if next_count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end "
+        "return 1"
+    )
+    try:
+        allowed = await _redis(settings.valkey_url).eval(
+            script,
+            1,
+            key,
+            settings.modal_max_requests_per_month,
+            40 * 24 * 60 * 60,
+        )
+    except Exception as error:
+        raise ModalQuotaStoreUnavailable from error
+    if not allowed:
+        raise ModalMonthlyQuotaExceeded
 
 
 async def close_session_store() -> None:

@@ -23,10 +23,12 @@ services:
       KNOWLEDGE_DIR: /app/knowledge
     volumes:
       - ./knowledge:/app/knowledge:ro
+      - embedding-cache:/root/.cache/huggingface
     depends_on:
       - valkey
       - qdrant
 
 volumes:
+  embedding-cache:
   qdrant-data:
   valkey-data:

@@ -1,7 +1,14 @@
 import unittest
+from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 from app.config import Settings
-from app.llm import build_gemini_contents, build_modal_headers, build_modal_payload
+from app.llm import (
+    _post_modal_completion,
+    build_gemini_contents,
+    build_modal_headers,
+    build_modal_payload,
+)
 
 
 def settings(provider: str) -> Settings:
@@ -9,6 +16,7 @@ def settings(provider: str) -> Settings:
         bot_token="test-token",
         llm_provider=provider,
         system_prompt="Be helpful.",
+        gemini_api_key="test-api-key",
         gemini_model="gemini-2.5-flash",
         google_cloud_project="test-project",
         google_cloud_location="global",
@@ -16,6 +24,8 @@ def settings(provider: str) -> Settings:
         modal_llm_model="test-model",
         modal_proxy_token_id="wk-test-id",
         modal_proxy_token_secret="ws-test-secret",
+        modal_max_requests_per_month=180,
+        embedding_provider="local",
         llm_timeout_seconds=30,
         llm_max_tokens=128,
         valkey_url="redis://localhost:6379/0",
@@ -80,6 +90,35 @@ class LLMFormattingTests(unittest.TestCase):
 
         self.assertIn("document-specific question", payload["messages"][0]["content"])
         self.assertNotIn("REFERENCE MATERIAL", payload["messages"][0]["content"])
+
+    def test_modal_completion_retries_startup_503_once(self):
+        request = httpx.Request("POST", "https://example.modal.run/v1/chat/completions")
+        unavailable = httpx.Response(503, request=request)
+        ready = httpx.Response(200, json={"ok": True}, request=request)
+        client = Mock()
+        client.post = AsyncMock(side_effect=[unavailable, ready])
+
+        async def check_retry():
+            with patch("app.llm.asyncio.sleep", new_callable=AsyncMock) as sleep:
+                response = await _post_modal_completion(client, str(request.url), {}, {})
+                sleep.assert_awaited_once_with(1)
+            self.assertEqual(response.json(), {"ok": True})
+
+        import asyncio
+
+        asyncio.run(check_retry())
+
+    def test_free_tier_gemini_api_client_uses_api_key(self):
+        from unittest.mock import patch
+
+        sentinel = object()
+        with patch("google.genai.Client", return_value=sentinel) as client_factory:
+            from app.llm import _gemini_api_client
+
+            _gemini_api_client.cache_clear()
+            self.assertIs(_gemini_api_client("test-api-key"), sentinel)
+            client_factory.assert_called_once_with(api_key="test-api-key")
+            _gemini_api_client.cache_clear()
 
 
 if __name__ == "__main__":

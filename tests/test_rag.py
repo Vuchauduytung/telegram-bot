@@ -1,10 +1,21 @@
 import unittest
 
 from app.ingest import chunk_text
+from app.embeddings import format_e5_inputs
 from app.rag import RetrievedChunk, format_citations, format_context
 
 
 class RagFormattingTests(unittest.TestCase):
+    def test_local_e5_embeddings_use_query_and_passage_prefixes(self):
+        self.assertEqual(
+            format_e5_inputs(["find this"], "RETRIEVAL_QUERY"),
+            ["query: find this"],
+        )
+        self.assertEqual(
+            format_e5_inputs(["document text"], "RETRIEVAL_DOCUMENT"),
+            ["passage: document text"],
+        )
+
     def test_chunk_text_applies_overlap_and_covers_source(self):
         text = "alpha beta gamma delta epsilon zeta eta theta"
         chunks = chunk_text(text, chunk_size=20, overlap=5)

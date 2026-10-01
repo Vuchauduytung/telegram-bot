@@ -4,6 +4,18 @@ from typing import Any
 from app.config import Settings
 
 
+def format_e5_inputs(texts: list[str], task_type: str) -> list[str]:
+    prefix = "query: " if task_type == "RETRIEVAL_QUERY" else "passage: "
+    return [f"{prefix}{text}" for text in texts]
+
+
+@lru_cache(maxsize=2)
+def _local_model(model_name: str) -> Any:
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name, device="cpu")
+
+
 @lru_cache(maxsize=4)
 def _vertex_client(project: str, location: str) -> Any:
     from google import genai
@@ -24,6 +36,14 @@ def embed_texts(
 ) -> list[list[float]]:
     if not texts:
         return []
+
+    if settings.embedding_provider == "local":
+        model = _local_model(settings.embedding_model)
+        inputs = format_e5_inputs(texts, task_type)
+        vectors = model.encode(inputs, normalize_embeddings=True).tolist()
+        if any(len(vector) != settings.embedding_dimensions for vector in vectors):
+            raise RuntimeError("Local embedding model returned an unexpected vector dimension.")
+        return vectors
 
     from google.genai import types
 

@@ -3,6 +3,7 @@ from functools import lru_cache
 from typing import Any
 
 from app.config import Settings
+from app.session import reserve_modal_request
 
 def _prompt_with_rag_policy(settings: Settings, rag_context: str) -> str:
     prompt = (
@@ -42,6 +43,23 @@ def build_modal_headers(settings: Settings) -> dict[str, str]:
     }
 
 
+async def _post_modal_completion(
+    client: Any,
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+) -> Any:
+    for attempt in range(10):
+        response = await client.post(url, json=payload, headers=headers)
+        if response.status_code != 503:
+            response.raise_for_status()
+            return response
+        if attempt == 9:
+            response.raise_for_status()
+        await asyncio.sleep(min(2**attempt, 8))
+    raise RuntimeError("Modal endpoint did not become ready.")
+
+
 def build_gemini_contents(messages: list[dict[str, str]]) -> list[Any]:
     from google.genai import types
 
@@ -67,6 +85,13 @@ def _gemini_client(project: str, location: str) -> Any:
     )
 
 
+@lru_cache(maxsize=4)
+def _gemini_api_client(api_key: str) -> Any:
+    from google import genai
+
+    return genai.Client(api_key=api_key)
+
+
 def _generate_with_gemini(
     settings: Settings,
     messages: list[dict[str, str]],
@@ -89,11 +114,37 @@ def _generate_with_gemini(
     return (response.text or "").strip()
 
 
+def _generate_with_gemini_api(
+    settings: Settings,
+    messages: list[dict[str, str]],
+    rag_context: str,
+) -> str:
+    from google.genai.types import GenerateContentConfig
+
+    client = _gemini_api_client(settings.gemini_api_key)
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=build_gemini_contents(messages),
+        config=GenerateContentConfig(
+            system_instruction=_prompt_with_rag_policy(settings, rag_context),
+            max_output_tokens=settings.llm_max_tokens,
+        ),
+    )
+    return (response.text or "").strip()
+
+
 async def generate_reply(
     settings: Settings,
     messages: list[dict[str, str]],
     rag_context: str = "",
 ) -> str:
+    if settings.llm_provider == "gemini-api":
+        return await asyncio.to_thread(
+            _generate_with_gemini_api,
+            settings,
+            messages,
+            rag_context,
+        )
     if settings.llm_provider == "gemini":
         return await asyncio.to_thread(
             _generate_with_gemini,
@@ -104,14 +155,15 @@ async def generate_reply(
 
     import httpx
 
+    await reserve_modal_request(settings)
     payload = build_modal_payload(settings, messages, rag_context)
     async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
-        response = await client.post(
+        response = await _post_modal_completion(
+            client,
             f"{settings.modal_llm_url}/v1/chat/completions",
-            json=payload,
-            headers=build_modal_headers(settings),
+            payload,
+            build_modal_headers(settings),
         )
-        response.raise_for_status()
     content = response.json()["choices"][0]["message"]["content"]
     if isinstance(content, list):
         content = "".join(

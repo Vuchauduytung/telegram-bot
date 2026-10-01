@@ -6,7 +6,13 @@ from telegram.ext import ContextTypes
 from app.config import Settings
 from app.llm import generate_reply
 from app.rag import format_citations, format_context, retrieve_chunks
-from app.session import clear_session, get_history, save_exchange
+from app.session import (
+    ModalMonthlyQuotaExceeded,
+    ModalQuotaStoreUnavailable,
+    clear_session,
+    get_history,
+    save_exchange,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +66,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply += format_citations(chunks)
         if not reply:
             reply = "The model returned an empty response. Please try again."
+    except ModalMonthlyQuotaExceeded:
+        await update.message.reply_text(
+            "Đã đạt giới hạn lượt gọi Modal tháng này. Bot sẽ mở lại vào đầu tháng sau."
+        )
+        return
+    except ModalQuotaStoreUnavailable:
+        logger.exception("Modal monthly quota store is unavailable for chat %s", chat_id)
+        await update.message.reply_text(
+            "Mình tạm dừng gọi model để bảo vệ ngân sách vì Valkey chưa sẵn sàng."
+        )
+        return
     except Exception:
         logger.exception("LLM request failed for chat %s", chat_id)
         await update.message.reply_text(
