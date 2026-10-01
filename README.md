@@ -1,17 +1,23 @@
 # General-purpose Telegram AI bot
 
-Telegram polling bot that can use Gemini on Vertex AI or the OpenAI-compatible LLM endpoint served by `modal_llm.py`. Both providers receive the same system prompt and recent per-chat conversation history.
+Telegram polling bot with a no-per-request-charge profile: Gemini Developer API free tier for generation, local multilingual-E5 embeddings, Qdrant retrieval, and Valkey conversation history. A private Modal GPU profile is also available for local Qwen generation when its extra compute cost is acceptable.
 
-The bot also retrieves relevant Markdown/TXT sources from Qdrant, embeds documents and queries with Vertex AI, and appends source citations to answers when evidence is found.
+The bot retrieves relevant Markdown/TXT sources from Qdrant and appends source citations to answers. Default profiles use local embeddings; Vertex AI embeddings are an optional paid configuration.
 
 ## Configure
 
 Create a Telegram bot with [@BotFather](https://t.me/BotFather), then copy `.env.example` to `.env` and set `BOT_TOKEN`.
 
-Choose one backend:
+## Free-tier profile (recommended)
 
-- **Gemini:** set `LLM_PROVIDER=gemini` and `GOOGLE_CLOUD_PROJECT`. Authenticate with Application Default Credentials, for example `gcloud auth application-default login`. The selected identity needs access to Vertex AI.
-- **Modal:** copy `.env.modal.example` to `.env.modal`, create a dedicated proxy token with `modal workspace proxy-tokens create --name cloud-bot-bot`, and save its ID and secret in `.env.modal`. Deploy `modal_llm.py`; it requires Modal proxy authentication. Put the deployment's base URL (without `/v1/chat/completions`) in `MODAL_LLM_URL` in `.env.modal`. The token secret is shown only once by Modal; keep `.env.modal` private and never commit it.
+Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey), then put it in `.env` as `GEMINI_API_KEY`. Do not send or commit the key. The free tier has model- and account-specific quotas/rate limits, is not unlimited, and its data-use terms differ from the paid tier. Check [current pricing and free-tier details](https://ai.google.dev/gemini-api/docs/pricing) before production use.
+
+The free profile uses `gemini-2.5-flash` for answers and `intfloat/multilingual-e5-small` on the bot host for embeddings. The local embedding model has no per-request API charge; first use downloads its weights and consumes local CPU/RAM/disk. Vertex ADC is not needed by this profile.
+
+## Optional paid providers
+
+- **Vertex AI:** set `LLM_PROVIDER=gemini` or `EMBEDDING_PROVIDER=vertex`, configure `GOOGLE_CLOUD_PROJECT`, and provide ADC. These requests are billed to Google Cloud; Gemini API free-tier quotas do not apply.
+- **Modal low-cost GPU:** copy `.env.modal.example` to `.env.modal`, create a dedicated proxy token, and configure the private endpoint. The profile uses Qwen3 4B-Instruct in FP16 on an L4, scales to zero (`min_containers=0`), caps at one container, and scales down after 60 idle seconds. Cold starts are expected; no GPU stays warm while idle.
 
 `BOT_SYSTEM_PROMPT`, model names, request timeout, token limit, session length, and session TTL can also be changed in `.env`.
 
@@ -31,21 +37,27 @@ When Valkey is unavailable, the bot keeps session history in process memory unti
 
 ```bash
 cp .env.example .env
-docker compose -f compose.yaml -f compose.gemini.yaml up -d --build
+docker compose -f compose.yaml -f compose.free-tier.yaml up -d --build
 docker compose logs -f bot
 ```
 
-The Gemini Compose override mounts the host ADC file read-only at runtime. Set `GOOGLE_APPLICATION_CREDENTIALS_FILE` to a different host file path when needed. Do not add service-account keys to the project or commit them. For Modal mode, configure `.env.modal` and run:
+This profile requires `GEMINI_API_KEY` in `.env`; it does not mount Google Cloud credentials or call Vertex AI. Qdrant and Valkey run locally in Compose with persistent volumes.
+
+For paid Vertex generation/embedding, use `compose.gemini.yaml`; it mounts host ADC read-only. For paid Modal generation, configure `.env.modal` and run:
 
 ```bash
 docker compose -f compose.yaml -f compose.modal.yaml up -d --build
 ```
 
-Both Compose modes start Qdrant with a persistent volume and mount `./knowledge` read-only. Vertex ADC is used for embeddings even when Modal is selected for answer generation.
+As of October 2026, Modal lists L4 at `$0.000222/GPU-second`. With this profile's 4 vCPU and 16 GiB RAM, `$30/month` Starter compute credits cover at most about **26.9 fully loaded hours** before any other usage; actual serving time will be lower. This is an estimate, not a hard spending cap. The bot additionally allows at most **400 Modal generation attempts per UTC month**, reserved before sending the request (failed attempts count), and fails closed if Valkey is unavailable. This protects bot traffic, not direct use of the private Proxy Token; `python test-modal.py` bypasses the bot counter. Monitor Modal usage and keep the token private.
+
+Google **Cloud Functions** does not attach GPUs. Google **Cloud Run services** support L4 GPUs and scale to zero, but require at least 4 vCPU and 16 GiB RAM, and bill the GPU for the instance's full lifetime. For this small, bursty budget, Modal's per-second GPU billing is the chosen optional profile; Cloud Run is a valid alternative if its full instance cost fits the budget.
+
+All Compose modes start Qdrant with a persistent volume and mount `./knowledge` read-only. The free and Modal profiles run embeddings locally. Vertex-mode embeddings require ADC.
 
 ## RAG Knowledge Base
 
-Add UTF-8 `.md` or `.txt` documents to `knowledge/`. Ingestion chunks each source, creates `gemini-embedding-001` vectors through Vertex AI, and upserts metadata and vectors into the private Qdrant service. The bot retrieves the top matching chunks before generation and includes source filenames in its reply. Re-ingesting a changed document replaces its previous chunks.
+Add UTF-8 `.md` or `.txt` documents to `knowledge/`. In the free profile, ingestion chunks each source, creates 384-dimensional multilingual-E5 vectors locally, and upserts metadata and vectors into the private Qdrant service. The bot retrieves top matching chunks before generation and includes source filenames in its reply. Re-ingesting a changed document replaces its previous chunks.
 
 With the Modal deployment:
 
@@ -53,13 +65,13 @@ With the Modal deployment:
 docker compose -f compose.yaml -f compose.modal.yaml run --rm bot python -m app.ingest
 ```
 
-With Gemini generation, replace `compose.modal.yaml` with `compose.gemini.yaml`. Remove an indexed source by its path relative to `knowledge/`:
+For the free profile, replace `compose.modal.yaml` with `compose.free-tier.yaml`. Its separate Qdrant collection avoids mixing 384-dimensional local vectors with the previous 768-dimensional Vertex vectors. Remove an indexed source by its path relative to `knowledge/`:
 
 ```bash
 docker compose -f compose.yaml -f compose.modal.yaml run --rm bot python -m app.ingest --delete-source cloud_bot_guide.md
 ```
 
-Settings for collection name, embedding dimensions, chunk size/overlap, top-k, minimum relevance, and context budget are in `.env.example`. Changing embedding model or dimensions requires re-indexing into a collection with matching vector dimensions. PDF/URL ingestion, hybrid search, reranking, and automated RAG evaluation are not implemented yet.
+Settings for collection name, embedding dimensions, chunk size/overlap, top-k, minimum relevance, and context budget are in `.env.example`. Changing embedding model or dimensions requires a new collection and full re-index. PDF/URL ingestion, hybrid search, reranking, and automated RAG evaluation are not implemented yet.
 
 ## Conversation commands
 
@@ -73,5 +85,4 @@ Settings for collection name, embedding dimensions, chunk size/overlap, top-k, m
 PYTHONPATH=. python tests/test_llm.py
 PYTHONPATH=. python tests/test_rag.py
 python -m compileall -q app tests
-python test-modal.py
 ```

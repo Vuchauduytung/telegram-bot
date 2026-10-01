@@ -9,11 +9,11 @@ Các dấu chọn phản ánh hiện trạng sau khi triển khai Qdrant-backed 
 ## Hiện trạng
 
 - [x] Telegram polling, `/start`, `/help`, `/reset`.
-- [x] Chọn Gemini trên Vertex AI hoặc LLM tương thích OpenAI chạy trên Modal.
+- [x] Free profile: Gemini Developer API free tier; Vertex AI và Modal là provider tùy chọn có tính phí.
 - [x] Lưu lịch sử hội thoại theo chat trong Valkey; có fallback bộ nhớ tiến trình.
-- [x] Nạp Markdown/TXT, chia nhỏ, embedding bằng Vertex AI và lập chỉ mục trong Qdrant.
+- [x] Nạp Markdown/TXT, chia nhỏ, embedding local multilingual-E5 và lập chỉ mục trong Qdrant.
 - [x] Semantic retrieval top-k có ngưỡng relevance.
-- [x] Đưa context truy xuất vào Gemini/Modal và hiển thị citation nguồn.
+- [x] Đưa context truy xuất vào Gemini và hiển thị citation nguồn.
 - [ ] Đánh giá chất lượng retrieval và câu trả lời RAG.
 
 ## Kiến trúc mục tiêu
@@ -53,7 +53,7 @@ Các ranh giới module đề xuất:
 - [x] **Document ingestion**: Markdown/TXT, CLI ingest/re-ingest, đếm thành công/thất bại; ID ổn định thay chunk cũ khi re-ingest.
 - [x] **Metadata nguồn**: lưu `document_id`, relative source path, title, `chunk_id`, content hash, chunk index và thời điểm cập nhật.
 - [x] **Chunking có thể cấu hình**: kích thước và overlap qua env; metadata được gắn cho từng chunk.
-- [x] **Embedding adapter**: Vertex AI `gemini-embedding-001`; cùng model, task type tương ứng và dimension được dùng khi ingest/query.
+- [x] **Embedding adapter**: local `intfloat/multilingual-e5-small` (384 dimensions) trong free profile; dùng prefix `passage:` khi ingest và `query:` khi truy vấn. Vertex AI là tùy chọn có tính phí.
 - [x] **Vector store**: Qdrant dense vectors và metadata payload; collection/dimension được kiểm tra khi khởi tạo.
 - [x] **Semantic retrieval**: top-k và minimum score cấu hình được, giữ source metadata.
 - [x] **Grounded answer**: context được giới hạn theo character budget; system prompt yêu cầu coi tài liệu là dữ liệu, không phải lệnh.

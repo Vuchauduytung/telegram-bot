@@ -9,11 +9,14 @@ skinparam defaultTextAlignment center
 
 actor "Telegram user" as user
 cloud "Telegram Bot API" as telegram
-cloud "Google Vertex AI\nGemini (alternate provider)" as gemini
+cloud "Gemini Developer API\nfree tier, quota limited" as gemini_api
+cloud "Vertex AI\noptional paid provider" as vertex
+cloud "Modal Qwen3 4B FP16 / L4\noptional paid, scale-to-zero" as modal_paid
 
 node "Bot host" as host {
   node "Docker Compose network" as compose {
     component "Telegram bot\npython-telegram-bot polling\napp.main" as bot
+    component "multilingual-e5-small\nlocal CPU embeddings\n384 dimensions" as embedder
     database "Qdrant\ncloud_bot_knowledge\nprivate port :6333" as qdrant
     database "Valkey\nper-chat conversation history" as valkey
   }
@@ -23,59 +26,46 @@ node "Bot host" as host {
     artifact "valkey-data volume" as valkey_data
   }
 
-  artifact ".env\nBOT_TOKEN and common settings\nGit-ignored" as bot_env
-  artifact ".env.modal\nModal URL and Proxy Token\nmode 0600, Git-ignored" as modal_env
-}
-
-package "Modal workspace" as modal_workspace {
-  component "Modal proxy\nProxy Token authentication" as modal_proxy
-
-  node "Private Modal Server\nunauthenticated = false" as modal_server {
-    node "H100 GPU container" as gpu_container {
-      component "SGLang\nOpenAI-compatible API\n:8000" as sglang
-    }
-  }
-
-  folder "Modal volumes" as modal_volumes {
-    artifact "Hugging Face model cache" as hf_cache
-    artifact "DeepGEMM cache" as deepgemm_cache
-  }
+  artifact ".env\nBOT_TOKEN + GEMINI_API_KEY\nGit-ignored" as bot_env
 }
 
 folder "Knowledge documents\nMarkdown / TXT, read-only mount" as documents
-component "Ingestion CLI\nparse, chunk, Vertex embeddings" as ingestion
+component "Ingestion CLI\nparse, chunk, local embeddings" as ingestion
 component "RAG retrieval\ntop-k + context + citations" as retrieval
 
 user --> telegram : chat messages
 bot --> telegram : HTTPS long polling
 bot --> valkey : read/write history
-bot --> qdrant : query embedding + top-k search
+bot --> embedder : query: prefix
+embedder --> qdrant : query vector + top-k search
 valkey ..> valkey_data : persists data
 qdrant ..> qdrant_data : persists vectors
 
-bot --> modal_proxy : POST /v1/chat/completions\nModal-Key + Modal-Secret
-modal_proxy --> sglang : authenticated proxy route
-sglang ..> hf_cache : model files
-sglang ..> deepgemm_cache : kernel cache
-
-bot ..> gemini : selected only when\nLLM_PROVIDER=gemini
+bot --> gemini_api : HTTPS generateContent
+bot ..> vertex : optional paid generation
+bot ..> modal_paid : optional paid generation
 
 documents --> ingestion
-ingestion --> gemini : RETRIEVAL_DOCUMENT embeddings
+ingestion --> embedder : passage: prefix
 ingestion --> qdrant : upsert chunks + source metadata
-bot --> retrieval : query embedding\n(RETRIEVAL_QUERY)
+bot --> retrieval : semantic query
 retrieval --> qdrant : dense vector search
 retrieval --> bot : context + citations
 
-note bottom of modal_proxy
-  Requests without a valid Modal Proxy Token
-  are rejected with HTTP 401.
+note bottom of retrieval
+  Free profile: Markdown/TXT, local embeddings,
+  Qdrant dense top-k retrieval, and source citations.
+  Gemini free tier has usage quotas. Vertex/Modal are not used
+  unless an explicitly paid Compose profile is selected.
 end note
 
-note bottom of retrieval
-  Implemented MVP: Markdown/TXT, Vertex embeddings,
-  Qdrant dense top-k retrieval, and source citations.
-  PDF, hybrid search, reranking, and evaluation are not deployed.
+note right of modal_paid
+  min_containers=0, max_containers=1,
+  60-second idle scale-down, 8K context,
+  max 256 generated tokens, 400 bot calls/month.
+  App quota is not a billing hard cap.
+  Cloud Functions has no GPU attachment;
+  Cloud Run GPU is a separate product.
 end note
 
 @enduml

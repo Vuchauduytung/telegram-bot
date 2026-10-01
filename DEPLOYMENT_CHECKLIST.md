@@ -1,6 +1,6 @@
 # Deployment Checklist
 
-This checklist targets the Telegram polling bot and its Qdrant-backed RAG stack deployed with Docker Compose on a Linux host. Checking items off is an operator action; this file does not mean every operational control has already been completed.
+This checklist targets the Telegram polling bot and Qdrant RAG stack. The recommended profile uses Gemini Developer API free tier with local embeddings; free-tier quotas and data terms still apply.
 
 Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
@@ -12,6 +12,7 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
   ```bash
   PYTHONPATH=. python tests/test_llm.py
   PYTHONPATH=. python tests/test_rag.py
+  PYTHONPATH=. python tests/test_modal_quota.py
   python -m compileall -q app tests
   ```
 
@@ -23,7 +24,7 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
 - [ ] Use a supported Linux host with Docker Engine and the Docker Compose plugin.
 - [ ] Reserve enough disk space for container images, Valkey data, logs, and backups.
-- [ ] Allow outbound HTTPS to Telegram, Vertex AI, and the selected generation provider; allow internal bot-to-Valkey/Qdrant traffic on the Compose network.
+- [ ] Allow outbound HTTPS to Telegram and the selected generation provider; allow internal bot-to-Valkey/Qdrant traffic on the Compose network.
 - [ ] Do not expose Valkey or the bot container ports publicly. Polling requires outbound access only.
 - [ ] Configure host restart and disk monitoring; verify the host clock is synchronized.
 
@@ -35,7 +36,14 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 - [ ] Set a deliberate `BOT_SYSTEM_PROMPT`, model, timeout, token limit, and session TTL.
 - [ ] Check `docker compose config --quiet` before starting containers.
 
-### Gemini on Vertex AI
+### Gemini Developer API Free Tier
+
+- [ ] Create a Gemini API key in Google AI Studio and store it as `GEMINI_API_KEY` in `.env` with restrictive file permissions.
+- [ ] Use `compose.free-tier.yaml`; do not configure Vertex ADC or Modal credentials for this profile.
+- [ ] Confirm the selected model's current free-tier availability, quota, region, and data-use terms in Google's pricing page.
+- [ ] Define handling for 429/quota-exhausted responses; free tier has limits and is not unlimited.
+
+### Optional Paid Vertex AI
 
 - [ ] Enable Vertex AI for the selected Google Cloud project and confirm billing/quota are available.
 - [ ] Provide Application Default Credentials or workload identity to the bot process with only the required Vertex AI permissions.
@@ -45,14 +53,18 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
 ### Modal-hosted model
 
-- [ ] Confirm GPU availability, quotas, model revision, expected cold-start time, and cost before deploying `modal_llm.py`.
-- [ ] Review the current Modal configuration: it requests an H100, keeps `MIN_CONTAINERS=1`, and has a 30-minute scaledown window. Confirm this always-warm GPU cost is intentional.
+- [ ] Confirm GPU availability, quotas, model revision, cold-start time, and monthly spend before deploying `modal_llm.py`.
+- [ ] Review the low-cost Modal profile: Qwen3 4B-Instruct FP16 on L4, `min_containers=0`, `max_containers=1`, 8K context, and 60-second scale-down.
+- [ ] Budget against current Modal rates: L4 is listed at `$0.000222/GPU-second`; with 4 vCPU and 16 GiB RAM, `$30` covers at most about 26.9 fully loaded hours before other usage. Starter credits are not a hard spend cap; monitor usage and configure billing controls.
+- [ ] Confirm the bot's atomic Valkey quota is set to 400 Modal generation attempts per UTC month. It fails closed if Valkey is down; direct endpoint calls with the Proxy Token bypass this app-level quota.
+- [ ] Cloud Functions do not attach GPUs. If evaluating Google's GPU option, compare Cloud Run L4 (at least 4 vCPU/16 GiB; GPU billed for full instance lifetime even though it can scale to zero) against the Modal profile.
 - [ ] Confirm `modal_llm.py` keeps `unauthenticated=False`; Modal proxy authentication must reject unauthenticated requests with HTTP 401.
 - [ ] Create a dedicated proxy token with `modal workspace proxy-tokens create --name cloud-bot-bot`. If workspace RBAC is enabled, allow it only in the deployment environment. The token secret is shown once; store it only in `.env.modal`.
 - [ ] Deploy the private model service with `modal deploy modal_llm.py` and record its base URL in `.env.modal`, without adding `/v1/chat/completions`.
 - [ ] Set `MODAL_PROXY_TOKEN_ID`, `MODAL_PROXY_TOKEN_SECRET`, `MODAL_LLM_URL`, and `MODAL_LLM_MODEL` in `.env.modal`; verify `.env.modal` is ignored by Git.
 - [ ] Run `python test-modal.py` and confirm response text and latency before starting the Telegram bot.
 - [ ] Start the bot with `docker compose -f compose.yaml -f compose.modal.yaml up -d --build` and verify authenticated provider access from inside the container.
+- [ ] Confirm Modal returns to zero active containers after the 60-second idle window; send one smoke request, verify cold-start behavior, then confirm it scales down.
 
 ## 4. Deploy the Current Bot
 
@@ -92,16 +104,16 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
 ## 7. RAG Operations and Remaining Gates
 
-The current stack includes Markdown/TXT ingestion, Vertex embeddings, Qdrant dense retrieval, context assembly, and source citations. Hybrid retrieval, reranking, deterministic abstention, and automated evaluation are still outstanding.
+The current stack includes Markdown/TXT ingestion, local multilingual-E5 embeddings in the free profile, Qdrant dense retrieval, context assembly, and source citations. Hybrid retrieval, reranking, deterministic abstention, and automated evaluation are still outstanding.
 
 - [x] Add Qdrant to Compose with persistent storage and no published host ports.
 - [x] Confirm ingestion is idempotent; sample corpus stayed at two points after re-ingest.
-- [x] Re-index documents and verify Vertex model/dimension match query and index vectors.
+- [x] Re-index documents and verify the embedding model/dimension match query and index vectors.
 - [ ] Define and test Qdrant backup/restore and collection migration.
 - [ ] Run an automated RAG evaluation set. Review Recall@k/MRR, groundedness, citation correctness, and no-answer behavior against agreed thresholds.
 - [ ] Verify user/tenant filters are enforced in retrieval before any multi-user private corpus is loaded.
 - [ ] Confirm source text and prompts are excluded from ordinary logs; document retention and deletion behavior.
-- [x] Smoke-test a supported question through retrieval and Modal generation; verify citation points to retrieved filename.
+- [x] Smoke-test a supported question through retrieval and generation; verify citation points to retrieved filename.
 - [ ] Smoke-test unsupported questions, follow-ups, and source updates/deletions against production policy.
 - [ ] Enable RAG for a small canary audience first; monitor retrieval misses, false citations, latency, and cost before widening access.
 - [ ] Keep a rollback path that can disable retrieval or return to the non-RAG bot without deleting the document index.
