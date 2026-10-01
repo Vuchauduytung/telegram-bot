@@ -1,6 +1,6 @@
 # Deployment Checklist
 
-This checklist targets the current Telegram polling bot deployed with Docker Compose on a Linux host. It also includes a separate release gate for the planned RAG stack. Checking items off is an operator action; this file does not mean a deployment has already happened.
+This checklist targets the Telegram polling bot and its Qdrant-backed RAG stack deployed with Docker Compose on a Linux host. Checking items off is an operator action; this file does not mean every operational control has already been completed.
 
 Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
@@ -11,6 +11,7 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
   ```bash
   PYTHONPATH=. python tests/test_llm.py
+  PYTHONPATH=. python tests/test_rag.py
   python -m compileall -q app tests
   ```
 
@@ -22,7 +23,7 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
 - [ ] Use a supported Linux host with Docker Engine and the Docker Compose plugin.
 - [ ] Reserve enough disk space for container images, Valkey data, logs, and backups.
-- [ ] Allow outbound HTTPS to Telegram and to the selected LLM provider; allow internal bot-to-Valkey traffic on the Compose network.
+- [ ] Allow outbound HTTPS to Telegram, Vertex AI, and the selected generation provider; allow internal bot-to-Valkey/Qdrant traffic on the Compose network.
 - [ ] Do not expose Valkey or the bot container ports publicly. Polling requires outbound access only.
 - [ ] Configure host restart and disk monitoring; verify the host clock is synchronized.
 
@@ -46,10 +47,12 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 
 - [ ] Confirm GPU availability, quotas, model revision, expected cold-start time, and cost before deploying `modal_llm.py`.
 - [ ] Review the current Modal configuration: it requests an H100, keeps `MIN_CONTAINERS=1`, and has a 30-minute scaledown window. Confirm this always-warm GPU cost is intentional.
-- [ ] **Do not use the current endpoint as a production public service without adding access control.** `modal_llm.py` sets `unauthenticated=True`; anyone who obtains its URL can send inference requests. Add an authenticated gateway or equivalent restriction, then update the bot client to send and verify credentials before production use.
-- [ ] Deploy the model service with `modal deploy modal_llm.py` and record its base URL in the secret environment configuration, without adding `/v1/chat/completions`.
-- [ ] Set `LLM_PROVIDER=modal`, `MODAL_LLM_URL`, and the exact served `MODAL_LLM_MODEL`.
-- [ ] Run `modal run test-modal.py` and confirm response text and latency before starting the Telegram bot.
+- [ ] Confirm `modal_llm.py` keeps `unauthenticated=False`; Modal proxy authentication must reject unauthenticated requests with HTTP 401.
+- [ ] Create a dedicated proxy token with `modal workspace proxy-tokens create --name cloud-bot-bot`. If workspace RBAC is enabled, allow it only in the deployment environment. The token secret is shown once; store it only in `.env.modal`.
+- [ ] Deploy the private model service with `modal deploy modal_llm.py` and record its base URL in `.env.modal`, without adding `/v1/chat/completions`.
+- [ ] Set `MODAL_PROXY_TOKEN_ID`, `MODAL_PROXY_TOKEN_SECRET`, `MODAL_LLM_URL`, and `MODAL_LLM_MODEL` in `.env.modal`; verify `.env.modal` is ignored by Git.
+- [ ] Run `python test-modal.py` and confirm response text and latency before starting the Telegram bot.
+- [ ] Start the bot with `docker compose -f compose.yaml -f compose.modal.yaml up -d --build` and verify authenticated provider access from inside the container.
 
 ## 4. Deploy the Current Bot
 
@@ -87,23 +90,24 @@ Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
 - [ ] If a provider credential or endpoint may be exposed, revoke/rotate it first, then update the bot configuration and restart.
 - [ ] Verify `/start`, a normal message, and session continuity after rollback.
 
-## 7. Additional Gate Before Enabling RAG
+## 7. RAG Operations and Remaining Gates
 
-The current deployment does **not** include document ingestion, embeddings, Qdrant, retrieval, citations, or RAG evaluation. Do not claim that answers are grounded in uploaded documents until these gates are complete.
+The current stack includes Markdown/TXT ingestion, Vertex embeddings, Qdrant dense retrieval, context assembly, and source citations. Hybrid retrieval, reranking, deterministic abstention, and automated evaluation are still outstanding.
 
-- [ ] Implement the P0 items in [FEATURES_RAG.md](FEATURES_RAG.md), including ingestion, stable chunk metadata, embedding provider, Qdrant, retrieval, citations, and abstention.
-- [ ] Add Qdrant to the deployment with persistent storage, health checks, network isolation, backup/restore, and a documented collection migration strategy.
-- [ ] Confirm ingestion is idempotent; verify source updates and deletions remove stale chunks.
-- [ ] Re-index a representative corpus and verify embedding model, vector dimensions, and query/index preprocessing match.
-- [ ] Run the RAG evaluation set. Review retrieval Recall@k/MRR, groundedness, citation correctness, and no-answer behavior against agreed thresholds.
+- [x] Add Qdrant to Compose with persistent storage and no published host ports.
+- [x] Confirm ingestion is idempotent; sample corpus stayed at two points after re-ingest.
+- [x] Re-index documents and verify Vertex model/dimension match query and index vectors.
+- [ ] Define and test Qdrant backup/restore and collection migration.
+- [ ] Run an automated RAG evaluation set. Review Recall@k/MRR, groundedness, citation correctness, and no-answer behavior against agreed thresholds.
 - [ ] Verify user/tenant filters are enforced in retrieval before any multi-user private corpus is loaded.
 - [ ] Confirm source text and prompts are excluded from ordinary logs; document retention and deletion behavior.
-- [ ] Smoke-test a supported question, an unsupported question, a follow-up question, and a source update against the deployed RAG pipeline.
+- [x] Smoke-test a supported question through retrieval and Modal generation; verify citation points to retrieved filename.
+- [ ] Smoke-test unsupported questions, follow-ups, and source updates/deletions against production policy.
 - [ ] Enable RAG for a small canary audience first; monitor retrieval misses, false citations, latency, and cost before widening access.
 - [ ] Keep a rollback path that can disable retrieval or return to the non-RAG bot without deleting the document index.
 
 ## Go / No-Go
 
 - [ ] **Go** only when release tests pass, secrets and provider access are verified, spend is approved, smoke tests pass, and rollback is available.
-- [ ] **No-go for Modal production** while the inference endpoint remains unauthenticated and publicly callable.
-- [ ] **No-go for RAG claims** until the additional RAG gate above is complete and evaluation results are accepted.
+- [ ] **No-go for Modal production** unless the deployed inference endpoint rejects requests without a valid proxy token.
+- [ ] **No-go for high-confidence grounded-answer claims** until deterministic abstention and evaluation thresholds are implemented and accepted.

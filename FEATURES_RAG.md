@@ -4,16 +4,16 @@
 
 Phát triển Telegram bot hiện tại thành trợ lý đa dụng có thể trả lời dựa trên tài liệu do người vận hành cung cấp. Khi câu hỏi cần kiến thức ngoài hội thoại, bot phải truy xuất nguồn liên quan, trả lời có căn cứ và nói rõ khi không tìm thấy đủ thông tin.
 
-Đây là đặc tả tính năng. Các mục RAG bên dưới chưa được triển khai trong phiên bản hiện tại.
+Các dấu chọn phản ánh hiện trạng sau khi triển khai Qdrant-backed RAG MVP. Các mục chưa chọn vẫn là kế hoạch.
 
 ## Hiện trạng
 
 - [x] Telegram polling, `/start`, `/help`, `/reset`.
 - [x] Chọn Gemini trên Vertex AI hoặc LLM tương thích OpenAI chạy trên Modal.
 - [x] Lưu lịch sử hội thoại theo chat trong Valkey; có fallback bộ nhớ tiến trình.
-- [ ] Nạp, chia nhỏ và lập chỉ mục tài liệu.
-- [ ] Tạo embedding và tìm kiếm bằng vector database.
-- [ ] Ground câu trả lời theo kết quả truy xuất và trích dẫn nguồn.
+- [x] Nạp Markdown/TXT, chia nhỏ, embedding bằng Vertex AI và lập chỉ mục trong Qdrant.
+- [x] Semantic retrieval top-k có ngưỡng relevance.
+- [x] Đưa context truy xuất vào Gemini/Modal và hiển thị citation nguồn.
 - [ ] Đánh giá chất lượng retrieval và câu trả lời RAG.
 
 ## Kiến trúc mục tiêu
@@ -50,16 +50,16 @@ Các ranh giới module đề xuất:
 
 ### P0: RAG MVP
 
-- [ ] **Document ingestion**: hỗ trợ Markdown và TXT trước; mở rộng PDF có trích xuất trang. Một lệnh CLI ingest/re-ingest tài liệu, báo số file thành công/thất bại và không tạo bản ghi trùng khi chạy lại.
-- [ ] **Metadata nguồn**: lưu `document_id`, tên tài liệu, đường dẫn hoặc URL, trang (nếu có), tiêu đề, `chunk_id`, phiên bản/hash và thời điểm cập nhật.
-- [ ] **Chunking có thể cấu hình**: chia theo cấu trúc heading/đoạn trước, giới hạn kích thước và overlap sau; không cắt rời metadata nguồn khỏi chunk.
-- [ ] **Embedding adapter**: cấu hình riêng `EMBEDDING_PROVIDER` và `EMBEDDING_MODEL`. Cùng một model, dimension và preprocessing phải được dùng cho ingestion lẫn query.
-- [ ] **Vector store**: dùng Qdrant cho dense vector và metadata payload; tên collection/version được cấu hình, có lệnh kiểm tra trạng thái index.
-- [ ] **Semantic retrieval**: truy xuất top-k chunk, loại kết quả dưới ngưỡng relevance và giữ lại nguồn gốc của từng chunk.
-- [ ] **Grounded answer**: đưa các đoạn truy xuất vào context có giới hạn token; yêu cầu LLM chỉ dùng tài liệu cho câu hỏi thuộc phạm vi knowledge base.
-- [ ] **Abstention**: nếu không có nguồn phù hợp hoặc bằng chứng mâu thuẫn/thiếu, bot nói chưa đủ thông tin thay vì tự điền bằng kiến thức không dẫn nguồn.
-- [ ] **Citations trong Telegram**: trả tên tài liệu và trang/heading/link khi có; citation phải trỏ tới chunk thực sự được đưa vào prompt.
-- [ ] **Tách lịch sử và tri thức**: Valkey giữ hội thoại; Qdrant giữ tài liệu. Lịch sử có thể giúp hiểu đại từ/câu hỏi nối tiếp nhưng không được xem là nguồn xác thực cho dữ kiện.
+- [x] **Document ingestion**: Markdown/TXT, CLI ingest/re-ingest, đếm thành công/thất bại; ID ổn định thay chunk cũ khi re-ingest.
+- [x] **Metadata nguồn**: lưu `document_id`, relative source path, title, `chunk_id`, content hash, chunk index và thời điểm cập nhật.
+- [x] **Chunking có thể cấu hình**: kích thước và overlap qua env; metadata được gắn cho từng chunk.
+- [x] **Embedding adapter**: Vertex AI `gemini-embedding-001`; cùng model, task type tương ứng và dimension được dùng khi ingest/query.
+- [x] **Vector store**: Qdrant dense vectors và metadata payload; collection/dimension được kiểm tra khi khởi tạo.
+- [x] **Semantic retrieval**: top-k và minimum score cấu hình được, giữ source metadata.
+- [x] **Grounded answer**: context được giới hạn theo character budget; system prompt yêu cầu coi tài liệu là dữ liệu, không phải lệnh.
+- [ ] **Abstention**: prompt hướng dẫn không đoán khi câu hỏi thuộc knowledge base nhưng không có evidence; deterministic no-answer policy và evaluation chưa có.
+- [x] **Citations trong Telegram**: source number trong context khớp danh sách filename/title đính kèm.
+- [x] **Tách lịch sử và tri thức**: Valkey lưu hội thoại; Qdrant lưu tài liệu.
 
 ### P1: Nâng chất lượng retrieval
 
@@ -68,7 +68,7 @@ Các ranh giới module đề xuất:
 - [ ] **Reranking**: rerank tập ứng viên nhỏ trước khi dựng context; bật/tắt và chọn model qua cấu hình.
 - [ ] **Context packing**: loại chunk trùng lặp, ưu tiên nguồn có relevance cao, giữ diversity giữa tài liệu và không vượt token budget.
 - [ ] **Metadata filters**: lọc theo tập tài liệu, loại tài liệu, ngôn ngữ hoặc quyền truy cập trước khi trả kết quả.
-- [ ] **Source lifecycle**: cập nhật/xóa tài liệu phải xóa hoặc thay thế đúng các chunk cũ; hỗ trợ dry-run và báo cáo thay đổi.
+- [x] **Source lifecycle cơ bản**: re-ingest thay các chunk cùng source; `--delete-source` xóa đúng source. Dry-run và đồng bộ tự xóa file bị thiếu chưa có.
 
 ### P2: Vận hành và mở rộng
 
@@ -90,11 +90,11 @@ Các ranh giới module đề xuất:
 
 ## Tiêu chí nghiệm thu MVP
 
-- Ingest cùng một tập tài liệu hai lần không làm tăng bản ghi trùng; cập nhật hoặc xóa file phản ánh đúng trong Qdrant.
-- Một câu hỏi có trong tài liệu trả lời đúng ý và có citation khớp với chunk đã truy xuất.
+- [x] Ingest cùng tập tài liệu lần hai giữ nguyên số point; cập nhật/xóa source qua CLI thay đổi đúng document ID.
+- [x] Câu hỏi mẫu có trong tài liệu trả lời đúng ý và citation khớp chunk truy xuất.
 - Một câu hỏi không có trong tài liệu không tạo ra citation giả và bot nói rõ không đủ căn cứ.
 - Câu hỏi nối tiếp như “còn cách thứ hai thì sao?” được contextualize nhưng không làm thay đổi thực thể hoặc ý định ban đầu.
-- Có test cho parsing/chunking, metadata, embedding dimensions, retrieval, citation/abstention và provider Gemini/Modal.
+- Có unit tests cho chunking/citation/provider; test integration retrieval/Qdrant đã chạy thủ công, chưa có test tự động cho metadata, embedding dimensions, retrieval, và unsupported-query behavior.
 - Evaluation report tách riêng chất lượng retrieval và chất lượng câu trả lời; ít nhất theo dõi Recall@k/MRR cho retrieval và citation correctness/groundedness cho answer.
 - Lỗi Qdrant hoặc embedding được ghi nhận và trả thông báo phù hợp; bot không giả vờ đã tra cứu tài liệu.
 
