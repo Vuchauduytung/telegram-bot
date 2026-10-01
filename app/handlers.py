@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes
 
 from app.config import Settings
 from app.llm import generate_reply
+from app.rag import format_citations, format_context, retrieve_chunks
 from app.session import clear_session, get_history, save_exchange
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-        reply = await generate_reply(settings, messages)
+        chunks = await retrieve_chunks(settings, user_message)
+        rag_context = format_context(chunks, settings.rag_context_max_chars)
+        reply = await generate_reply(settings, messages, rag_context)
+        if chunks:
+            reply += format_citations(chunks)
         if not reply:
             reply = "The model returned an empty response. Please try again."
     except Exception:
