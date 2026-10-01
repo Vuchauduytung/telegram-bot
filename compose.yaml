@@ -1,0 +1,20 @@
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: valkey-server --appendonly yes
+    volumes:
+      - valkey-data:/data
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      VALKEY_URL: redis://valkey:6379/0
+    depends_on:
+      - valkey
+
+volumes:
+  valkey-data:

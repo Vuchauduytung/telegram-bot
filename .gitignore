@@ -1,0 +1,6 @@
+.env
+gcp-service-account.json
+.secrets/
+.venv/
+__pycache__/
+*.py[cod]
