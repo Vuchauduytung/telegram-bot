@@ -1,0 +1,1 @@
+"""Telegram bot backed by Gemini or a Modal-hosted OpenAI-compatible LLM."""
