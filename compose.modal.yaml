@@ -1,0 +1,12 @@
+services:
+  bot:
+    env_file:
+      - .env.modal
+    environment:
+      LLM_PROVIDER: modal
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/google-application-default-credentials.json
+    volumes:
+      - type: bind
+        source: ${GOOGLE_APPLICATION_CREDENTIALS_FILE:-${HOME}/.config/gcloud/application_default_credentials.json}
+        target: /run/secrets/google-application-default-credentials.json
+        read_only: true

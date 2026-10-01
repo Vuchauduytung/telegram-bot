@@ -1,4 +1,10 @@
 services:
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+
   valkey:
     image: valkey/valkey:8-alpine
     restart: unless-stopped
@@ -13,8 +19,14 @@ services:
       - .env
     environment:
       VALKEY_URL: redis://valkey:6379/0
+      QDRANT_URL: http://qdrant:6333
+      KNOWLEDGE_DIR: /app/knowledge
+    volumes:
+      - ./knowledge:/app/knowledge:ro
     depends_on:
       - valkey
+      - qdrant
 
 volumes:
+  qdrant-data:
   valkey-data:

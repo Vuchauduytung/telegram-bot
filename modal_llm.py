@@ -234,8 +234,8 @@ def warmup():
     # Keep warm container alive.
     scaledown_window=30 * 60,
 
-    # Public OpenAI-compatible endpoint.
-    unauthenticated=True,
+    # Require Modal Proxy Token authentication at the endpoint.
+    unauthenticated=False,
 )
 class LLMServer:
 

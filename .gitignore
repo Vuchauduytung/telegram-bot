@@ -1,4 +1,5 @@
 .env
+.env.modal
 gcp-service-account.json
 .secrets/
 .venv/
