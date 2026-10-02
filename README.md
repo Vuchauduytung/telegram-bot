@@ -6,6 +6,8 @@ The bot retrieves relevant Markdown/TXT sources from Qdrant and appends source c
 
 For the production webhook deployment, see the [Cloud Run deployment guide](CLOUD_RUN_DEPLOYMENT_GUIDE.md). The polling and Compose instructions below are for local development and self-hosted deployments.
 
+For a planned migration from Telegram to Rainbow by ALE, see the [Rainbow setup guide](RAINBOW_SETUP_GUIDE.md). Rainbow integration is not implemented in the current bot yet.
+
 ## Configure
 
 Create a Telegram bot with [@BotFather](https://t.me/BotFather), then copy `.env.example` to `.env` and set `TELEGRAM_BOT_TOKEN` (the legacy `BOT_TOKEN` name is still accepted).
