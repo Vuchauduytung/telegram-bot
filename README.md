@@ -1,8 +1,10 @@
 # General-purpose Telegram AI bot
 
-Telegram polling bot with a no-per-request-charge profile: Gemini Developer API free tier for generation, local multilingual-E5 embeddings, Qdrant retrieval, and Valkey conversation history. A private Modal GPU profile is also available for local Qwen generation when its extra compute cost is acceptable.
+Telegram AI bot with local polling and a production Cloud Run webhook profile. The no-per-request-charge profile uses the Gemini Developer API free tier for generation, local multilingual-E5 embeddings, Qdrant retrieval, and Valkey conversation history. A private Modal GPU profile is also available for local Qwen generation when its extra compute cost is acceptable.
 
 The bot retrieves relevant Markdown/TXT sources from Qdrant and appends source citations to answers. Default profiles use local embeddings; Vertex AI embeddings are an optional paid configuration.
+
+For the production webhook deployment, see the [Cloud Run deployment guide](CLOUD_RUN_DEPLOYMENT_GUIDE.md). The polling and Compose instructions below are for local development and self-hosted deployments.
 
 ## Configure
 
@@ -12,7 +14,7 @@ Create a Telegram bot with [@BotFather](https://t.me/BotFather), then copy `.env
 
 Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/apikey), then put it in `.env` as `GEMINI_API_KEY`. Do not send or commit the key. The free tier has model- and account-specific quotas/rate limits, is not unlimited, and its data-use terms differ from the paid tier. Check [current pricing and free-tier details](https://ai.google.dev/gemini-api/docs/pricing) before production use.
 
-The free profile uses `gemini-2.5-flash` for answers and `intfloat/multilingual-e5-small` on the bot host for embeddings. The local embedding model has no per-request API charge; first use downloads its weights and consumes local CPU/RAM/disk. Vertex ADC is not needed by this profile.
+The free profile uses `gemini-3.5-flash-lite` for answers and `intfloat/multilingual-e5-small` on the bot host for embeddings. The local embedding model has no per-request API charge; first use downloads its weights and consumes local CPU/RAM/disk. Vertex ADC is not needed by this profile.
 
 ## Optional paid providers
 

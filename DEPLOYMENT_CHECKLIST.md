@@ -2,7 +2,7 @@
 
 This checklist targets the Telegram polling bot and Qdrant RAG stack. The recommended profile uses Gemini Developer API free tier with local embeddings; free-tier quotas and data terms still apply.
 
-Related docs: [README.md](README.md) and [FEATURES_RAG.md](FEATURES_RAG.md).
+Related docs: [README.md](README.md), [Cloud Run Webhook Deployment Guide](CLOUD_RUN_DEPLOYMENT_GUIDE.md), and [FEATURES_RAG.md](FEATURES_RAG.md).
 
 ## 1. Release Readiness
 
